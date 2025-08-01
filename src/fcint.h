@@ -46,6 +46,10 @@
 #include <fontconfig/fontconfig.h>
 #include <fontconfig/fcprivate.h>
 
+#if ENABLE_FONTATIONS
+#  include <fontconfig/fcfontations.h>
+#endif
+
 #include <stddef.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -134,6 +138,8 @@ extern pfnSHGetFolderPathA          pSHGetFolderPathA;
 #  include <libintl.h>
 #  define _(x) (dgettext (GETTEXT_PACKAGE, x))
 #else
+/* dgettext macro must be defined after existing declarations */
+#  include <locale.h>
 #  define dgettext(d, s) (s)
 #  define _(x)           (x)
 #endif
@@ -613,6 +619,14 @@ struct _FcConfig {
     FcFilterFontSetFunc filter_func;       /* A predicate function to filter out config->fonts */
     FcDestroyFunc       destroy_data_func; /* A callback function to destroy config->filter_data */
     void               *filter_data;       /* An user data to be used for filter_func */
+
+    FcBool prefer_app_fonts; /* Whether FcSetApplication has a priority than
+                                FcSetSystem for lookup */
+
+    FcChar8  *default_lang;  /* Primary language in default_langs */
+    FcStrSet *default_langs; /* String sets of the default languages */
+    FcChar8  *prgname;       /* Program name of current process */
+    FcChar8  *desktop_name;  /* Current desktop name */
 };
 
 typedef struct _FcFileTime {
@@ -937,16 +951,22 @@ FcInitDebug (void);
 
 /* fcdefault.c */
 FcPrivate FcChar8 *
+FcConfigGetDefaultLang (FcConfig *config);
+
+FcPrivate FcChar8 *
 FcGetDefaultLang (void);
+
+FcPrivate FcChar8 *
+FcConfigGetPrgname (FcConfig *config);
 
 FcPrivate FcChar8 *
 FcGetPrgname (void);
 
 FcPrivate FcChar8 *
-FcGetDesktopName (void);
+FcConfigGetDesktopName (FcConfig *config);
 
-FcPrivate void
-FcDefaultFini (void);
+FcPrivate FcChar8 *
+FcGetDesktopName (void);
 
 /* fcdir.c */
 
@@ -1041,8 +1061,26 @@ void
 FcRuleDestroy (FcRule *rule);
 
 /* fclang.c */
+typedef struct {
+    const FcChar8   lang[16];
+    const FcCharSet charset;
+} FcLangCharSet;
+
+typedef struct {
+    int begin;
+    int end;
+} FcLangCharSetRange;
+
+#include "fclang.h"
+
+struct _FcLangSet {
+    FcStrSet *extra;
+    FcChar32  map_size;
+    FcChar32  map[NUM_LANG_SET_MAP];
+};
+
 FcPrivate FcLangSet *
-FcFreeTypeLangSet (const FcCharSet *charset,
+FcLangSetFromCharSet (const FcCharSet *charset,
                    const FcChar8   *exclusiveLang);
 
 FcPrivate FcLangResult
@@ -1395,6 +1433,8 @@ FcPrivate FcChar8 *
 FcStrSerialize (FcSerialize *serialize, const FcChar8 *str);
 
 /* fcobjs.c */
+FcPrivate void
+FcObjectInit (void);
 
 FcPrivate void
 FcObjectFini (void);

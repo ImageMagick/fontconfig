@@ -493,6 +493,8 @@ static const FcMacRomanFake fcMacRomanFake[] = {
     { TT_MS_LANGID_ENGLISH_UNITED_STATES, "ASCII"    },
 };
 
+static const char fcSilfCapability[] = "ttable:Silf";
+
 static FcChar8 *
 FcFontCapabilities (FT_Face face);
 
@@ -693,7 +695,9 @@ FcSfntNameTranscode (FT_SfntName *sname)
 	return 0;
     fromcode = fcFtEncoding[i].fromcode;
 
+#if USE_ICONV
 retry:
+#endif
     /*
      * Many names encoded for TT_PLATFORM_MACINTOSH are broken
      * in various ways. Kludge around them.
@@ -842,13 +846,6 @@ retry:
 	iconv_close (cd);
 	*outbuf = '\0';
 	goto done;
-    }
-#else
-    if (!redecoded) {
-	/* Regard the encoding as UTF-16BE and try again. */
-	redecoded = FcTrue;
-	fromcode = "UTF-16BE";
-	goto retry;
     }
 #endif
     return 0;
@@ -1353,7 +1350,7 @@ FcFreeTypeQueryFaceInternal (const FT_Face   face,
      * BDF properties will queried.
      */
 
-    if (os2 && os2->version >= 0x0001 && os2->version != 0xffff) {
+    if (os2 && os2->version != 0xffff) {
 	if (os2->achVendID[0] != 0) {
 	    foundry_ = (FcChar8 *)malloc (sizeof (os2->achVendID) + 1);
 	    memcpy ((void *)foundry_, os2->achVendID, sizeof (os2->achVendID));
@@ -1512,7 +1509,10 @@ FcFreeTypeQueryFaceInternal (const FT_Face   face,
 		    len = strlen ((const char *)pp);
 		    memmove (utf8, pp, len + 1);
 		    pp = utf8 + len;
-		    while (pp > utf8 && *(pp - 1) == ' ')
+		    while (pp > utf8 &&
+			   (*(pp - 1) == ' ' ||
+			    *(pp - 1) == '\r' ||
+			    *(pp - 1) == '\n'))
 			pp--;
 		    *pp = 0;
 
@@ -1528,13 +1528,12 @@ FcFreeTypeQueryFaceInternal (const FT_Face   face,
 		    }
 		    free (utf8);
 		    if (lang) {
-			/* pad lang list with 'und' to line up with elt */
-			while (*nlangp < *np) {
-			    if (!FcPatternObjectAddString (pat, objlang, (FcChar8 *)"und"))
-				goto bail1;
-			    ++*nlangp;
-			}
 			if (!FcPatternObjectAddString (pat, objlang, lang))
+			    goto bail1;
+			++*nlangp;
+		    } else {
+			/* Add und as a fallback */
+			if (!FcPatternObjectAddString (pat, objlang, (FcChar8 *)"und"))
 			    goto bail1;
 			++*nlangp;
 		    }
@@ -1995,7 +1994,7 @@ FcFreeTypeQueryFaceInternal (const FT_Face   face,
 	if (ls_share && *ls_share)
 	    ls = FcLangSetCopy (*ls_share);
 	else {
-	    ls = FcFreeTypeLangSet (cs, exclusiveLang);
+	    ls = FcLangSetFromCharSet (cs, exclusiveLang);
 	    if (ls_share)
 		*ls_share = FcLangSetCopy (ls);
 	}
@@ -2662,14 +2661,14 @@ FcFontCapabilities (FT_Face face)
 	goto bail;
 
     maxsize = (((FT_ULong)gpos_count + (FT_ULong)gsub_count) * OTLAYOUT_LEN +
-               (issilgraphitefont ? 13 : 0));
+               (issilgraphitefont ? strlen(fcSilfCapability) + 1: 0));
     complex_ = malloc (sizeof (FcChar8) * maxsize);
     if (!complex_)
 	goto bail;
 
     complex_[0] = '\0';
     if (issilgraphitefont)
-	strcpy ((char *)complex_, "ttable:Silf ");
+	strcpy ((char *)complex_, fcSilfCapability);
 
     while ((indx1 < gsub_count) || (indx2 < gpos_count)) {
 	if (indx1 == gsub_count) {

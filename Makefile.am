@@ -24,7 +24,7 @@
 SUBDIRS=fontconfig fc-case fc-lang src \
 	fc-cache fc-cat fc-conflist fc-list fc-match \
 	fc-pattern fc-query fc-scan fc-validate conf.d \
-	its po test
+	its po po-conf test
 if ENABLE_DOCS
 SUBDIRS += doc
 endif
@@ -40,7 +40,7 @@ MESON_FILES = \
 	fc-case/fc-case.py \
 	fc-lang/fc-lang.py \
 	meson.build \
-	meson_options.txt \
+	meson.options \
 	src/cutout.py \
 	src/fcstdint.h.in \
 	src/fcwindows.h \

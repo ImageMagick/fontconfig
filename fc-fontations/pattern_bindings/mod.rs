@@ -22,39 +22,82 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
- extern crate fc_fontations_bindgen;
-
-mod fc_wrapper;
+pub mod fc_wrapper;
 
 use std::ffi::CString;
 use std::fmt::Debug;
 
-use fc_fontations_bindgen::fcint::{
-    FcPattern, FcPatternObjectAddBool, FcPatternObjectAddDouble, FcPatternObjectAddInteger,
-    FcPatternObjectAddRange, FcPatternObjectAddString, FC_FAMILY_OBJECT,
+use fcint_bindings::{
+    FcPattern, FcPatternObjectAddBool, FcPatternObjectAddCharSet, FcPatternObjectAddDouble,
+    FcPatternObjectAddInteger, FcLangSet, FcPatternObjectAddLangSet, FcPatternObjectAddRange,
+    FcPatternObjectAddString, FC_FAMILY_OBJECT, FC_FILE_OBJECT,
 };
 
-use self::fc_wrapper::{FcPatternWrapper, FcRangeWrapper};
+use fc_wrapper::{FcCharSetWrapper, FcLangSetWrapper, FcPatternWrapper, FcRangeWrapper};
 
 #[allow(unused)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PatternValue {
     String(CString),
     Boolean(bool),
     Integer(i32),
     Double(f64),
     Range(FcRangeWrapper),
+    LangSet(FcLangSetWrapper),
+    CharSet(FcCharSetWrapper),
 }
 
-#[derive(Debug)]
+impl From<CString> for PatternValue {
+    fn from(item: CString) -> Self {
+        PatternValue::String(item)
+    }
+}
+
+impl From<i32> for PatternValue {
+    fn from(item: i32) -> Self {
+        PatternValue::Integer(item)
+    }
+}
+
+impl From<bool> for PatternValue {
+    fn from(item: bool) -> Self {
+        PatternValue::Boolean(item)
+    }
+}
+
+impl From<f64> for PatternValue {
+    fn from(item: f64) -> Self {
+        PatternValue::Double(item)
+    }
+}
+
+impl From<FcRangeWrapper> for PatternValue {
+    fn from(item: FcRangeWrapper) -> Self {
+        PatternValue::Range(item)
+    }
+}
+
+impl From<FcCharSetWrapper> for PatternValue {
+    fn from(value: FcCharSetWrapper) -> Self {
+        PatternValue::CharSet(value)
+    }
+}
+
+impl From<FcLangSetWrapper> for PatternValue {
+    fn from(value: FcLangSetWrapper) -> Self {
+        PatternValue::LangSet(value)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct PatternElement {
-    object_id: i32,
-    value: PatternValue,
+    pub object_id: i32,
+    pub value: PatternValue,
 }
 
 impl PatternElement {
     #[allow(unused)]
-    fn new(object_id: i32, value: PatternValue) -> Self {
+    pub fn new(object_id: i32, value: PatternValue) -> Self {
         Self { object_id, value }
     }
 }
@@ -86,6 +129,16 @@ impl PatternElement {
             PatternValue::Range(value) => unsafe {
                 FcPatternObjectAddRange(pattern, self.object_id, value.into_raw())
             },
+            PatternValue::CharSet(value) => unsafe {
+                FcPatternObjectAddCharSet(pattern, self.object_id, value.into_raw())
+            },
+            PatternValue::LangSet(value) => unsafe {
+                FcPatternObjectAddLangSet(
+                    pattern,
+                    self.object_id,
+                    value.into_raw() as *const FcLangSet,
+                )
+            },
         } == 1;
         if pattern_add_success {
             return Ok(());
@@ -94,7 +147,7 @@ impl PatternElement {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct FcPatternBuilder {
     elements: Vec<PatternElement>,
 }
@@ -114,23 +167,25 @@ impl FcPatternBuilder {
     pub fn create_fc_pattern(&mut self) -> Option<FcPatternWrapper> {
         let pattern = FcPatternWrapper::new()?;
 
-        let mut family_name_encountered = false;
+        let mut family_name_or_file_name_encountered = false;
 
         const FAMILY_ID: i32 = FC_FAMILY_OBJECT as i32;
+        const FILE_ID: i32 = FC_FILE_OBJECT as i32;
+
         for element in self.elements.drain(0..) {
             if let PatternElement {
-                object_id: FAMILY_ID,
-                value: PatternValue::String(ref fam_name),
+                object_id: FAMILY_ID | FILE_ID,
+                value: PatternValue::String(ref file_fam_name),
             } = element
             {
-                if !fam_name.is_empty() {
-                    family_name_encountered = true;
+                if !file_fam_name.is_empty() {
+                    family_name_or_file_name_encountered = true;
                 }
             }
             element.append_to_fc_pattern(pattern.as_ptr()).ok()?;
         }
 
-        if !family_name_encountered {
+        if !family_name_or_file_name_encountered {
             return None;
         }
 
@@ -138,15 +193,36 @@ impl FcPatternBuilder {
     }
 }
 
+/// Mainly needed for finding the style PatternElement in attributes.rs.
+impl<'a> IntoIterator for &'a FcPatternBuilder {
+    type Item = &'a PatternElement;
+    type IntoIter = std::slice::Iter<'a, PatternElement>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.elements.iter()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::ffi::CString;
 
-    use super::{FcPatternBuilder, FcRangeWrapper, PatternElement, PatternValue};
-    use fc_fontations_bindgen::fcint::{
-        FcPatternObjectGetBool, FcPatternObjectGetDouble, FcPatternObjectGetInteger,
-        FcPatternObjectGetRange, FcPatternObjectGetString, FcRange, FC_COLOR_OBJECT,
-        FC_FAMILY_OBJECT, FC_SLANT_OBJECT, FC_WEIGHT_OBJECT, FC_WIDTH_OBJECT,
+    use crate::pattern_bindings::fc_wrapper::FcLangSetWrapper;
+
+    use super::{
+        fc_wrapper::FcCharSetWrapper, FcPatternBuilder, FcRangeWrapper, PatternElement,
+        PatternValue,
+    };
+    use fontconfig_bindings::{
+        FcCharSet, FcCharSetAddChar, FcCharSetHasChar, FcLangSet, FcLangSetAdd, FcLangSetHasLang,
+        _FcLangResult_FcLangEqual,
+    };
+
+    use fcint_bindings::{
+        FcPatternObjectGetBool, FcPatternObjectGetCharSet, FcPatternObjectGetDouble,
+        FcPatternObjectGetInteger, FcPatternObjectGetLangSet, FcPatternObjectGetRange,
+        FcPatternObjectGetString, FcRange, FC_CHARSET_OBJECT, FC_COLOR_OBJECT, FC_FAMILY_OBJECT,
+        FC_LANG_OBJECT, FC_SLANT_OBJECT, FC_WEIGHT_OBJECT, FC_WIDTH_OBJECT,
     };
 
     #[test]
@@ -175,6 +251,28 @@ mod test {
         pattern_builder.append_element(PatternElement::new(
             FC_FAMILY_OBJECT as i32,
             PatternValue::String(CString::new("TestFont").unwrap()),
+        ));
+
+        let test_charset = FcCharSetWrapper::new().unwrap();
+        const BIANG: u32 = 0x30EDE;
+        unsafe {
+            assert!(FcCharSetAddChar(test_charset.as_ptr(), BIANG) != 0);
+        }
+
+        pattern_builder.append_element(PatternElement::new(
+            FC_CHARSET_OBJECT as i32,
+            PatternValue::CharSet(test_charset),
+        ));
+
+        let test_langset = FcLangSetWrapper::new().unwrap();
+        const LANG_EN: &[u8] = b"en\0";
+        unsafe {
+            assert!(FcLangSetAdd(test_langset.as_ptr(), LANG_EN.as_ptr()) != 0);
+        }
+
+        pattern_builder.append_element(PatternElement::new(
+            FC_LANG_OBJECT as i32,
+            PatternValue::LangSet(test_langset),
         ));
 
         let pattern = pattern_builder.create_fc_pattern().unwrap();
@@ -248,6 +346,31 @@ mod test {
                     .to_str()
                     .unwrap(),
                 "TestFont"
+            );
+
+            // Verify CharSet.
+            let mut retrieved_charset: *mut FcCharSet = std::mem::zeroed();
+            let get_result = FcPatternObjectGetCharSet(
+                fontconfig_pattern,
+                FC_CHARSET_OBJECT as i32,
+                0,
+                &mut retrieved_charset,
+            );
+            assert_eq!(get_result, 0);
+            assert_eq!(FcCharSetHasChar(retrieved_charset, BIANG), 1);
+
+            // Verify LangSet.
+            let mut retrieved_langset: *mut FcLangSet = std::mem::zeroed();
+            let get_result = FcPatternObjectGetLangSet(
+                fontconfig_pattern,
+                FC_LANG_OBJECT as i32,
+                0,
+                &mut retrieved_langset,
+            );
+            assert_eq!(get_result, 0);
+            assert_eq!(
+                FcLangSetHasLang(retrieved_langset, LANG_EN.as_ptr()),
+                _FcLangResult_FcLangEqual
             );
         }
     }

@@ -15,7 +15,7 @@
 .templates_sha: &template_sha ef5e4669b7500834a17ffe9277e15fbb6d977fff
 
 include:
-  {% for distro in distributions|sort(attribute="name") %}
+  {% for distro in distributions|sort(attribute="name")|unique(attribute="name") %}
   # {{ distro.name.capitalize() }} container builder template
   - project: 'freedesktop/ci-templates'
     ref: *template_sha
@@ -29,8 +29,9 @@ include:
 stages:
   - sanity check
   - prep
-  - style check
+  - build
   - test
+  - distro
   - deploy
   - container_clean
 
@@ -42,14 +43,15 @@ variables:
 # changing these will force rebuilding the associated image
 # Note: these tags have no meaning and are not tied to a particular
 # fontconfig version
-{% for distro in distributions %}
+{% for distro in distributions|unique(attribute="name") %}
   {{"%-15s"| format(distro.name.upper() + '_TAG:')}}'{{distro.tag}}-{{
     (ci_fairy.hashfiles('.gitlab-ci/config.yml',
-                        '.gitlab-ci/' + distro.name + '-install.sh'))[0:12]
+                        '.gitlab-ci/' + distro.name + '-install.sh',
+                        'build-aux/fetch-testfonts.py'))[0:12]
   }}'
 {% endfor %}
 
-{% for distro in distributions %}
+{% for distro in distributions|unique(attribute="name") %}
   {{"%-15s"| format(distro.name.upper() + '_EXEC:')}}'bash .gitlab-ci/{{distro.name}}-install.sh'
 {% endfor %}
 
@@ -95,7 +97,7 @@ check-ci-script:
 
 # Build a container for each distribution + version. The ci-templates
 # will re-use the containers if the tag doesn't change.
-{% for distro in distributions %}
+{% for distro in distributions|unique(attribute="name") %}
 {% for version in distro.versions %}
 
 {{distro.name}}:{{version}}@container-prep:
@@ -151,7 +153,7 @@ check-ci-script:
   only:
     - schedules
 
-{% for distro in distributions %}
+{% for distro in distributions|unique(attribute="name") %}
 {% for version in distro.versions %}
 {{distro.name}}:{{version}}@container-clean:
   extends:
@@ -167,30 +169,7 @@ check-ci-script:
 
 #######################################
 #                                     #
-#             style check             #
-#                                     #
-#######################################
-
-clang-format:
-  stage: style check
-  extends:
-    - .fdo.distribution-image@fedora
-  variables:
-    FDO_DISTRIBUTION_VERSION: 'rawhide'
-    FDO_DISTRIBUTION_TAG: $FEDORA_TAG
-  needs:
-    - 'fedora:rawhide@container-prep'
-  script:
-    - |
-      commit="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-${CI_MERGE_REQUEST_DIFF_BASE_SHA:?}}" || exit
-      echo sh .gitlab-ci/check-style.sh "$commit"
-      sh .gitlab-ci/check-style.sh "$commit"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-
-#######################################
-#                                     #
-#             build stage             #
+#           build template            #
 #                                     #
 #######################################
 
@@ -273,6 +252,7 @@ clang-format:
       [ $FC_BUILD_DISTCHECK -eq 1 ] && buildopt+=(-c)
       [ $FC_BUILD_NO_INSTALL -eq 1 ] && buildopt+=(-I)
       [ $FC_BUILD_NO_CHECK -eq 1 ] && buildopt+=(-C)
+      [ $FC_BUILD_SUBPROJECT -eq 1 ] && buildopt+=(-S)
       buildopt+=(-s $FC_BUILDSYS)
       buildopt+=(-t $FC_BUILD_TYPE)
       buildopt+=(-X $FC_XML_BACKEND)
@@ -284,6 +264,7 @@ clang-format:
     FC_BUILD_DISTCHECK: 0
     FC_BUILD_NO_INSTALL: 0
     FC_BUILD_NO_CHECK: 0
+    FC_BUILD_SUBPROJECT: 0
 
 .fc_artifacts:
   artifacts:
@@ -300,6 +281,7 @@ clang-format:
       - build*/fontconfig*/_build
       - build*/meson-logs/*
       - build*/meson-dist/*
+      - prefix*
 
 .upload:
   rules:
@@ -314,7 +296,99 @@ clang-format:
 
 #######################################
 #                                     #
-#              test stage             #
+#             build stage             #
+#                                     #
+#######################################
+
+{% for build in build_patterns %}
+build-{{build.name}}:
+  stage: build
+  extends:
+    - .build@template
+    - .fdo.distribution-image@fedora
+    - .fc_artifacts
+  variables:
+    FC_DISTRO_NAME: fedora
+    FDO_DISTRIBUTION_VERSION: rawhide
+    FDO_DISTRIBUTION_TAG: $FEDORA_TAG
+    {# Where we have extra_variables defined, add them to the list #}
+    {% if build.variables is defined %}
+    {% for key, value in build.variables.items() %}
+    {{key}}: {{value}}
+    {% endfor %}
+    {% endif %}
+  needs:
+    - fedora:rawhide@container-prep
+{% endfor %}
+
+#######################################
+#                                     #
+#                 test                #
+#                                     #
+#######################################
+
+.test_hook@template:
+  script:
+    - export PREFIX="$(echo $(pwd)/prefix-*)"
+    - |
+      if [ -n "$FC_TEST_EXEC" -a -f ".gitlab-ci/test-${FC_TEST_EXEC}.sh" ]; then
+        sh ".gitlab-ci/test-${FC_TEST_EXEC}.sh"
+      else
+        echo "*** No test script found"
+        exit 1
+      fi
+  variables:
+    FC_TEST_EXEC: ""
+
+clang-format:
+  stage: test
+  extends:
+    - .fdo.distribution-image@fedora
+  variables:
+    FDO_DISTRIBUTION_VERSION: 'rawhide'
+    FDO_DISTRIBUTION_TAG: $FEDORA_TAG
+  needs:
+    - 'fedora:rawhide@container-prep'
+  script:
+    - |
+      commit="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-${CI_MERGE_REQUEST_DIFF_BASE_SHA:?}}" || exit
+      echo sh .gitlab-ci/check-style.sh "$commit"
+      sh .gitlab-ci/check-style.sh "$commit"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+
+{% for test in test_patterns %}
+{{test.name}}:
+  stage: test
+  extends:
+    {% if 'parent' in test %}
+    - .test_hook@template
+    {% else %}
+    - .build@template
+    {% endif %}
+    - .fdo.distribution-image@fedora
+    - .fc_artifacts
+  variables:
+    FC_DISTRO_NAME: fedora
+    FDO_DISTRIBUTION_VERSION: rawhide
+    FDO_DISTRIBUTION_TAG: $FEDORA_TAG
+    FC_TEST_EXEC: {{test.name}}
+    {# Where we have extra_variables defined, add them to the list #}
+    {% if test.variables is defined %}
+    {% for key, value in test.variables.items() %}
+    {{key}}: {{value}}
+    {% endfor %}
+    {% endif %}
+  needs:
+    - fedora:rawhide@container-prep
+    {% if 'parent' in test %}
+    - build-{{test.parent}}
+    {% endif %}
+{% endfor %}
+
+#######################################
+#                                     #
+#            distro stage             #
 #                                     #
 #######################################
 
@@ -324,6 +398,7 @@ clang-format:
 
 {% if not 'build_only' in build or build.build_only == version %}
 t_{{distro.name}}:{{version}}:{{build.name}}:
+  stage: distro
   extends:
 {% if distro.qemu_based %}
     - .build-in-qemu@template
@@ -344,18 +419,6 @@ t_{{distro.name}}:{{version}}:{{build.name}}:
     {% endif %}
   needs:
     - '{{distro.name}}:{{version}}@container-prep'
-{% endif %}
-
-{% if 'upload' in build and build.upload == version %}
-t_{{distro.name}}:{{version}}:{{build.name}}:upload:
-  needs:
-    - t_{{distro.name}}:{{version}}:{{build.name}}
-  extends:
-    - .fdo.distribution-image@{{distro.name}}
-    - .upload
-  variables:
-    FDO_DISTRIBUTION_VERSION: '{{version}}'
-    FDO_DISTRIBUTION_TAG: ${{distro.name.upper()}}_TAG
 {% endif %}
 
 {% endfor %}
@@ -382,8 +445,28 @@ check-merge-request:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
+{% for distro in distributions %}
+{% for version in distro.versions %}
+{% for build in distro.builds %}
+{% if 'upload' in build and build.upload == version %}
+upload_asset:
+  stage: deploy
+  needs:
+    - t_{{distro.name}}:{{version}}:{{build.name}}
+  extends:
+    - .fdo.distribution-image@{{distro.name}}
+    - .upload
+  variables:
+    FDO_DISTRIBUTION_VERSION: '{{version}}'
+    FDO_DISTRIBUTION_TAG: ${{distro.name.upper()}}_TAG
+{% endif %}
+{% if 'doc' in build and build.doc == version %}
 pages:
   stage: deploy
+  needs:
+    - t_{{distro.name}}:{{version}}:{{build.name}}
+  dependencies:
+    - t_{{distro.name}}:{{version}}:{{build.name}}
   script:
     - |
       mkdir public || :
@@ -391,12 +474,12 @@ pages:
   artifacts:
     paths:
       - public
-  dependencies:
-    - t_fedora:rawhide:autotools shared libxml2
-  needs:
-    - t_fedora:rawhide:autotools shared libxml2
   rules:
     - if: $CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE != "merge_request_event"
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% endfor %}
 
 make-release:
   stage: deploy
@@ -408,7 +491,8 @@ make-release:
   script:
     - glab auth login -h ${CI_SERVER_HOST} -j ${CI_JOB_TOKEN}
     - |
-      glab release create ${CI_COMMIT_TAG} --name "Release ${CI_COMMIT_TAG}" -a "[{\"name\": \"fontconfig-${CI_COMMIT_TAG}.tar.xz\", \"url\": \"${PACKAGE_REGISTRY_URL}/fontconfig-${CI_COMMIT_TAG}.tar.xz\"}, {\"name\": \"fontconfig-${CI_COMMIT_TAG}.tar.xz (sha256sum)\", \"url\": \"${PACKAGE_REGISTRY_URL}/fontconfig-${CI_COMMIT_TAG}.tar.xz.sha256sum\"}]"
+      glab changelog generate -v ${CI_COMMIT_TAG} > changelog-${CI_COMMIT_TAG}.md
+      glab release create ${CI_COMMIT_TAG} --name "Release ${CI_COMMIT_TAG}" -F changelog-${CI_COMMIT_TAG}.md -a "[{\"name\": \"fontconfig-${CI_COMMIT_TAG}.tar.xz\", \"url\": \"${PACKAGE_REGISTRY_URL}/fontconfig-${CI_COMMIT_TAG}.tar.xz\"}, {\"name\": \"fontconfig-${CI_COMMIT_TAG}.tar.xz (sha256sum)\", \"url\": \"${PACKAGE_REGISTRY_URL}/fontconfig-${CI_COMMIT_TAG}.tar.xz.sha256sum\"}]"
 
 workflow:
   rules:

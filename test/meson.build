@@ -1,3 +1,17 @@
+fetch_test_fonts = custom_target(
+  'fetch_test_fonts',
+  output: 'testfonts',
+  command: [
+    python3,
+    join_paths(meson.project_source_root(), 'build-aux', 'fetch-testfonts.py'),
+    '--target-dir',
+    '@BUILD_ROOT@/testfonts',
+    '--try-symlink',
+  ],
+  build_by_default: false,
+  build_always_stale: true,
+)
+
 tests = [
   ['test-bz89617.c', {'c_args': ['-DSRCDIR="@0@"'.format(meson.current_source_dir())]}],
   ['test-bz131804.c'],
@@ -7,6 +21,7 @@ tests = [
   ['test-bz1744377.c'],
   ['test-issue180.c'],
   ['test-family-matching.c'],
+  ['test-ptrlist.c', {'include_directories': include_directories('../src'), 'dependencies': libintl_dep}],
 ]
 tests_not_parallel = []
 
@@ -19,6 +34,7 @@ if host_machine.system() != 'windows'
   tests_not_parallel += [
     # FIXME: this needs NotoSans-hinted.zip font downloaded and unpacked into test build directory! see run-test.sh
     ['test-crbug1004254.c', {'dependencies': dependency('threads')}], # for pthread
+    ['test-mt-fccfg.c', {'include_directories': include_directories('../src'), 'dependencies': dependency('threads')}],
   ]
 
   if get_option('default_library') == 'static'
@@ -29,18 +45,24 @@ if host_machine.system() != 'windows'
   endif
 endif
 
+link_with_libs = [libfontconfig_internal]
+if get_option('fontations').enabled()
+  link_with_libs += [fc_fontations]
+endif
 
 foreach test_data : tests + tests_not_parallel
   fname = test_data[0]
   opts = test_data.length() > 1 ? test_data[1] : {}
   extra_c_args = opts.get('c_args', [])
   extra_deps = opts.get('dependencies', [])
+  extra_incdir = opts.get('include_directories', [])
 
   test_name = fname.split('.')[0].underscorify()
-  exe = executable(test_name, fname,
+
+  exe = executable(test_name, fname, fcstdint_h, fclang_h,
     c_args: c_args + extra_c_args,
-    include_directories: incbase,
-    link_with: [libfontconfig_internal],
+    include_directories: [incbase] + extra_incdir,
+    link_with: link_with_libs,
     dependencies: extra_deps,
   )
 
@@ -54,7 +76,7 @@ endforeach
 
 if get_option('fontations').enabled()
   rust = import('rust')
-  rust.test('fc_fontations_rust_tests', fc_fontations, link_with: [fc_fontations, libfontconfig_internal])
+  rust.test('fc_fontations_rust_tests', fc_fontations, link_with: [libfontconfig_internal], depends: fetch_test_fonts, env: ['builddir=@0@'.format(meson.project_build_root())],)
 endif
 
 fs = import('fs')
@@ -73,9 +95,10 @@ if host_machine.system() != 'windows'
   if pytest.found()
     test('pytest', pytest, args: ['--tap'],
          workdir: meson.current_source_dir(),
-         env: ['builddir=@0@'.format(meson.current_build_dir())],
+         env: ['builddir=@0@'.format(meson.project_build_root())],
          protocol: 'tap',
-         timeout: 600)
+         timeout: 600,
+         depends: fetch_test_fonts)
   endif
 endif
 

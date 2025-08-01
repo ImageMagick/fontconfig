@@ -41,6 +41,7 @@ fi
 
 for i in \
 	45-generic.conf \
+	48-guessfamily.conf \
 	60-generic.conf \
 	70-no-bitmaps-and-emoji.conf \
 	70-no-bitmaps-except-emoji.conf \
@@ -54,6 +55,7 @@ for i in \
 	test-issue-286.json \
 	test-style-match.json \
 	test-filter.json \
+	test-appfont.json \
     ; do
     echo $RUNNER $TESTDIR/$i ...
     $RUNNER $TESTDIR/../conf.d/10-autohint.conf $TESTDIR/$i

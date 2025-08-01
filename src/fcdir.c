@@ -28,6 +28,10 @@
 #  include <dirent.h>
 #endif
 
+#if ENABLE_FONTATIONS
+#  include "fontconfig/fcfontations.h"
+#endif
+
 FcBool
 FcFileIsDir (const FcChar8 *file)
 {
@@ -77,7 +81,13 @@ FcFileScanFontConfig (FcFontSet     *set,
 	fflush (stdout);
     }
 
-    if (!FcFreeTypeQueryAll (file, -1, NULL, NULL, set))
+    unsigned int (*query_function) (const FcChar8 *, unsigned int, FcBlanks *, int *, FcFontSet *) = FcFreeTypeQueryAll;
+#if ENABLE_FONTATIONS
+    if (getenv ("FC_FONTATIONS")) {
+	query_function = FcFontationsQueryAll;
+    }
+#endif
+    if (!query_function (file, -1, NULL, NULL, set))
 	return FcFalse;
 
     if (FcDebug() & FC_DBG_SCAN)
@@ -239,7 +249,12 @@ FcDirScanConfig (FcFontSet     *set,
 	goto bail1;
     }
     while ((e = readdir (d))) {
-	if (e->d_name[0] != '.' && strlen (e->d_name) < FC_MAX_FILE_LEN) {
+	/* Ignore . and .. */
+	if (e->d_name[0] == '.' &&
+	    (e->d_name[1] == 0 ||
+	     (e->d_name[1] == '.' && e->d_name[2] == 0)))
+	    continue;
+	if (strlen (e->d_name) < FC_MAX_FILE_LEN) {
 	    strcpy ((char *)base, (char *)e->d_name);
 	    if (!FcStrSetAdd (files, file_prefix)) {
 		ret = FcFalse;
