@@ -24,7 +24,9 @@
 
 #include "fcint.h"
 
+#if ENABLE_FREETYPE
 #include "fcftint.h"
+#endif
 
 /* Objects MT-safe for readonly access. */
 
@@ -217,13 +219,13 @@ FcLangNormalize (const FcChar8 *lang)
      *
      * then. and maybe no need to try language_territory here.
      */
-    modifier = strchr ((const char *)s, '@');
+    modifier = strchr ((char *)s, '@');
     if (modifier) {
 	*modifier = 0;
 	modifier++;
 	mlen = strlen (modifier);
     }
-    encoding = strchr ((const char *)s, '.');
+    encoding = strchr ((char *)s, '.');
     if (encoding) {
 	*encoding = 0;
 	encoding++;
@@ -232,9 +234,9 @@ FcLangNormalize (const FcChar8 *lang)
 	    modifier = encoding;
 	}
     }
-    territory = strchr ((const char *)s, '_');
+    territory = strchr ((char *)s, '_');
     if (!territory)
-	territory = strchr ((const char *)s, '-');
+	territory = strchr ((char *)s, '-');
     if (territory) {
 	*territory = 0;
 	territory++;
@@ -1057,5 +1059,7 @@ FcLangIsExclusiveFromOs2 (unsigned long os2ulUnicodeRange1, unsigned long os2ulU
 
 #define __fclang__
 #include "fcaliastail.h"
+#if ENABLE_FREETYPE
 #include "fcftaliastail.h"
+#endif
 #undef __fclang__

@@ -22,10 +22,16 @@
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
+#ifdef HAVE_CONFIG_H
+#  include "config.h"
+#endif
+
 #include <fontconfig/fontconfig.h>
 
 #include <json.h>
+#include <locale.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 struct _FcConfig {
@@ -41,6 +47,19 @@ struct _FcConfig {
     FcFontSet *rejectPatterns;
     FcFontSet *fonts[FcSetApplication + 1];
 };
+
+#ifdef _WIN32
+int
+setenv (const char *name, const char *value, int overwrite)
+{
+    if (!overwrite) {
+        char *s = getenv (name);
+        if (s)
+            return 0;
+    }
+    return _putenv_s (name, value);
+}
+#endif
 
 static void
 apply_config (FcConfig *config, json_object *obj)
@@ -59,6 +78,36 @@ apply_config (FcConfig *config, json_object *obj)
 	    fprintf (stderr, "W: unknown object in config: %s\n", iter.key);
 	}
     }
+}
+
+static FcBool
+build_env (FcConfig *config, json_object *root)
+{
+    json_object     *env;
+    json_object_iter iter;
+
+    if (json_object_object_get_ex (root, "env", &env)) {
+	if (json_object_get_type (env) != json_type_object) {
+	    fprintf (stderr, "W: Invalid env defined\n");
+	    return FcFalse;
+	}
+	json_object_object_foreachC (env, iter)
+	{
+	    const char *v;
+
+	    if (json_object_get_type (iter.val) != json_type_string) {
+		fprintf (stderr, "E: key and value must be a string\n");
+		return FcFalse;
+	    }
+	    v = json_object_get_string (iter.val);
+	    if (strcmp (iter.key, "locale") == 0) {
+		setlocale (LC_ALL, v);
+	    } else {
+		setenv (iter.key, v, 1);
+	    }
+	}
+    }
+    return FcTrue;
 }
 
 static FcPattern *
@@ -181,6 +230,36 @@ build_pattern (json_object *obj)
 			v.type = FcTypeVoid;
 		    }
 		    continue;
+		} else if (fc_o && fc_o->type == FcTypeInteger) {
+		    for (i = 0; i < n; i++) {
+			o = json_object_array_get_idx (iter.val, i);
+			type = json_object_get_type (o);
+			if (type == json_type_string) {
+			    const FcConstant *c = FcNameGetConstant ((const FcChar8 *)json_object_get_string (o));
+			    if (!c) {
+				fprintf (stderr, "E: value is not a known constant\n");
+				fprintf (stderr, "   key: %s\n", iter.key);
+				fprintf (stderr, "   val: %s (idx: %d)\n", json_object_get_string (iter.val), i);
+				continue;
+			    }
+			    if (strcmp (c->object, iter.key) != 0) {
+				fprintf (stderr, "E: value is a constant of different object\n");
+				fprintf (stderr, "   key: %s\n", iter.key);
+				fprintf (stderr, "   val: %s (idx: %d)\n", json_object_get_string (iter.val), i);
+				fprintf (stderr, "   key implied by value: %s\n", c->object);
+				continue;
+			    }
+			    v.u.i = c->value;
+			} else if (type != json_type_int) {
+			    fprintf (stderr, "E: unable to convert to int\n");
+			    continue;
+			} else {
+			    v.u.i = json_object_get_int (o);
+			}
+			v.type = FcTypeInteger;
+			FcPatternAdd (pat, iter.key, v, FcTrue);
+			v.type = FcTypeVoid;
+		    }
 		} else {
 		    FcLangSet *ls = FcLangSetCreate();
 		    if (!ls) {
@@ -489,7 +568,7 @@ process_fs (FcConfig  *config,
 	    }
 	} while (FcPatternIterNext (result_fs->fonts[j], &iter));
     }
- bail:
+bail:
 
     return fail;
 }
@@ -519,7 +598,7 @@ process_list (FcConfig  *config,
     } else {
 	fail += process_fs (config, fs, result_fs);
     }
- bail:
+bail:
     if (fs)
 	FcFontSetDestroy (fs);
 
@@ -553,7 +632,7 @@ process_sort (FcConfig   *config,
     } else {
 	fail += process_fs (config, fs, result_fs);
     }
- bail:
+bail:
     if (fs)
 	FcFontSetDestroy (fs);
 
@@ -565,8 +644,8 @@ process_pattern (FcConfig  *config,
                  FcPattern *query,
                  FcPattern *result)
 {
-    FcPatternIter iter;
-    int           x, vc, fail = 0;
+    FcPatternIter iter1, iter2;
+    int           vc1, vc2, fail = 0, i;
 
     if (!query) {
 	fprintf (stderr, "E: no query defined.\n");
@@ -580,32 +659,42 @@ process_pattern (FcConfig  *config,
     }
     FcConfigSubstitute (config, query, FcMatchPattern);
 
-    FcPatternIterStart (result, &iter);
+    FcPatternIterStart (query, &iter1);
+    FcPatternIterStart (result, &iter2);
     do {
-	vc = FcPatternIterValueCount (result, &iter);
-	for (x = 0; x < vc; x++) {
-	    FcValue vr, vp;
+	const char *obj = FcPatternIterGetObject (result, &iter2);
 
-	    if (FcPatternIterGetValue (result, &iter, x, &vr, NULL) != FcResultMatch) {
-		fprintf (stderr, "E: unable to obtain a value from the expected result\n");
-		fail++;
-		goto bail;
-	    }
-	    if (FcPatternGet (query, FcPatternIterGetObject (result, &iter), x, &vp) != FcResultMatch) {
-		vp.type = FcTypeVoid;
-	    }
-	    if (!FcValueEqual (vp, vr)) {
-		printf ("E: failed to compare %s:\n", FcPatternIterGetObject (result, &iter));
-		printf ("   actual result:");
-		FcValuePrint (vp);
-		printf ("\n   expected result:");
-		FcValuePrint (vr);
+	if (!FcPatternFindIter (query, &iter1, obj)) {
+	    fprintf (stderr, "E: object (%s) not found in actual result\n", obj);
+	} else {
+	    vc1 = FcPatternIterValueCount (query, &iter1);
+	    vc2 = FcPatternIterValueCount (result, &iter2);
+	    if (vc1 != vc2 || !FcPatternIterEqual (query, &iter1, result, &iter2)) {
+		FcValue        v1, v2;
+		FcValueBinding b1, b2;
+
+		printf ("E: object (%s) mismatched:\n", obj);
+		printf ("   actual result: %d\n    ", vc1);
+		for (i = 0; i < vc1; i++) {
+		    if (FcPatternIterGetValue (query, &iter1, i, &v1, &b1) != FcResultMatch)
+			v1.type = FcTypeVoid;
+		    FcValuePrint (v1);
+		    printf (" ");
+		}
+		printf ("\n");
+		printf ("   expected result: %d\n    ", vc2);
+		for (i = 0; i < vc1; i++) {
+		    if (FcPatternIterGetValue (result, &iter2, i, &v2, &b2) != FcResultMatch)
+			v2.type = FcTypeVoid;
+		    FcValuePrint (v2);
+		    printf (" ");
+		}
 		printf ("\n");
 		fail++;
 		goto bail;
 	    }
 	}
-    } while (FcPatternIterNext (result, &iter));
+    } while (FcPatternIterNext (result, &iter2));
  bail:
     return fail;
 }
@@ -687,7 +776,7 @@ run_test (FcConfig *config, json_object *root)
 	} else if (method != NULL &&
 	           strcmp (method, "pattern") == 0) {
 	    fail += process_pattern (config, query, result);
-        } else {
+	} else {
 	    fprintf (stderr, "W: unknown testing method: %s\n", method);
 	}
 	if (method)
@@ -719,6 +808,10 @@ run_scenario (FcConfig *config, char *file)
     if (!root) {
 	fprintf (stderr, "E: Unable to read the file: %s\n", file);
 	return FcFalse;
+    }
+    if (!build_env (config, root)) {
+	ret = FcFalse;
+	goto bail1;
     }
     if (!build_fonts (config, root)) {
 	ret = FcFalse;

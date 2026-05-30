@@ -2,68 +2,60 @@
 # Copyright (C) 2025 Google LLC.
 # SPDX-License-Identifier: HPND
 
-import os
+from fctest import FcTest, FcExternalTestFont, FcBrokenFont
 from pathlib import Path
+from enum import Enum
 import pytest
-import re
-import requests
-import subprocess
 
 
-def builddir():
-    return Path(os.environ.get("builddir", Path(__file__).parent.parent))
+class RetCodeBehavior(Enum):
+    MUST_BE_ZERO = 1
+    MUST_MATCH = 2
 
 
-def list_test_fonts():
-    font_files = []
-    for root, _, files in os.walk(builddir() / "testfonts"):
-        for file in files:
-            # Variable .ttc not supported yet.
-            if file.endswith(".ttf"):
-                font_files.append(os.path.join(root, file))
-    return font_files
+@pytest.fixture
+def fctest():
+    return FcTest()
 
 
-def run_fc_query(font_file, with_fontations=False):
-    fc_query_path = builddir() / "fc-query" / "fc-query"
-
-    env = os.environ.copy()
-    if with_fontations:
-        env["FC_FONTATIONS"] = ""
-
-    result = subprocess.run(
-        [fc_query_path, font_file],
-        stdout=subprocess.PIPE,
-        env=env,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-
-    assert (
-        result.returncode == 0
-    ), f"fc-query failed for {font_file} with error: {result.stderr}"
-    assert result.stdout, f"fc-query produced no output for {font_file}"
-
-    return result
-
-
-@pytest.mark.parametrize("font_file", list_test_fonts())
-def test_fontations_freetype_fcquery_equal(font_file):
-    print(f"Testing with: {font_file}")  # Example usage
-
+def compare_fontations_freetype(fctest, font_file, ret_code_behavior: RetCodeBehavior):
     font_path = Path(font_file)
 
     if not font_path.exists():
-        pytest.skip(f"Font file not found: {font_file}")  # Skip if file missing
+        # Skip if file missing
+        pytest.skip(f"Font file not found: {font_file}")
 
-    result_freetype = run_fc_query(font_file).stdout.strip().splitlines()
-    result_fontations = (
-        run_fc_query(font_file, with_fontations=True)
-        .stdout.strip()
-        .splitlines()
-    )
+    for ret_ft, stdout_ft, stderr_ft in fctest.run_query([font_file]):
+        if ret_code_behavior == RetCodeBehavior.MUST_BE_ZERO:
+            assert ret_ft == 0, stderr_ft
+        result_freetype = stdout_ft.strip().splitlines()
+    fctest.with_fontations = True
+    for ret_fontations, stdout_fontations, stderr_fontations in fctest.run_query([font_file]):
+        if ret_code_behavior == RetCodeBehavior.MUST_BE_ZERO:
+            assert ret_fontations == 0, stderr_fontations
+        result_fontations = stdout_fontations.strip().splitlines()
+
+    if ret_code_behavior == RetCodeBehavior.MUST_MATCH:
+        assert ret_ft == ret_fontations, (
+            f"Return codes must match. "
+            f"Fontations: {ret_fontations} (stderr: {stderr_fontations}), "
+            f"FreeType: {ret_ft} (stderr: {stderr_ft})"
+        )
 
     assert (
         result_freetype == result_fontations
     ), f"FreeType and Fontations fc-query result must match. Fontations: {result_fontations}, FreeType: {result_freetype}"
+
+
+@pytest.mark.parametrize("font_file", FcExternalTestFont().fonts)
+def test_fontations_freetype_fcquery_equal(fctest, font_file):
+    fctest.logger.info(f'Testing with: {font_file}')
+    compare_fontations_freetype(
+        fctest, font_file, RetCodeBehavior.MUST_BE_ZERO)
+
+
+@pytest.mark.parametrize("font_file", FcBrokenFont().fonts)
+def test_fontations_freetype_fcquery_equal_broken_fonts(fctest, font_file):
+    fctest.logger.info(
+        f'Testing for FreeType equivalence with intentionally broken font: {font_file}')
+    compare_fontations_freetype(fctest, font_file, RetCodeBehavior.MUST_MATCH)

@@ -114,9 +114,9 @@ main (int argc, char **argv)
     int            brief = 0;
     int            quiet = 0;
     const FcChar8 *format = NULL;
-    const FcChar8 *format_optarg = NULL;
+    FcChar8       *format_optarg = NULL;
     int            nfont = 0;
-    int            i;
+    int            i, err = 0;
     FcObjectSet   *os = 0;
     FcFontSet     *fs;
     FcPattern     *pat;
@@ -138,7 +138,8 @@ main (int argc, char **argv)
 	    brief = 1;
 	    break;
 	case 'f':
-	    format_optarg = format = (FcChar8 *)strdup (optarg);
+	    format_optarg = FcStrCopy ((const FcChar8 *)optarg);
+	    format = (const FcChar8 *)format_optarg;
 	    break;
 	case 'q':
 	    quiet = 1;
@@ -200,6 +201,9 @@ main (int argc, char **argv)
 		if (s) {
 		    printf ("%s", s);
 		    FcStrFree (s);
+		} else {
+		    err = 1;
+		    break;
 		}
 	    }
 	}
@@ -215,5 +219,5 @@ main (int argc, char **argv)
 
     FcFini();
 
-    return quiet ? (nfont == 0 ? 1 : 0) : 0;
+    return quiet ? (nfont == 0 ? 1 : err) : err;
 }

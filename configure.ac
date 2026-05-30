@@ -23,7 +23,7 @@ dnl  PERFORMANCE OF THIS SOFTWARE.
 dnl
 dnl Process this file with autoconf to create configure.
 
-AC_PREREQ([2.69])
+AC_PREREQ([2.71])
 
 dnl ==========================================================================
 dnl                               Versioning
@@ -33,7 +33,7 @@ dnl This is the package version number, not the shared library
 dnl version.  This same version number must appear in fontconfig/fontconfig.h
 dnl Yes, it is a pain to synchronize version numbers.  Unfortunately, it's
 dnl not possible to extract the version number here from fontconfig.h
-AC_INIT([fontconfig],[2.17.1],[https://gitlab.freedesktop.org/fontconfig/fontconfig/issues/new])
+AC_INIT([fontconfig],[2.18.0],[https://gitlab.freedesktop.org/fontconfig/fontconfig/issues/new])
 AM_INIT_AUTOMAKE([1.11 parallel-tests dist-xz foreign])
 m4_ifdef([AM_SILENT_RULES],[AM_SILENT_RULES([yes])])
 
@@ -68,8 +68,19 @@ dnl Initialize libtool
 LT_PREREQ([2.2])
 LT_INIT([disable-static win32-dll])
 
+dnl fc version
+eval `echo $VERSION |
+	awk -F. '{ printf ("major=%d\nminor=%d\nrevision=%d\n",
+			   $1, $2, $3); }'`
+AC_DEFINE_UNQUOTED([FC_VERSION_MAJOR], [$major], [major version])
+AC_DEFINE_UNQUOTED([FC_VERSION_MINOR], [$minor], [minor version])
+AC_DEFINE_UNQUOTED([FC_VERSION_MICRO], [$revision], [revision])
+
+dnl Preparation for enabling a FreeType-less build, for now, default enable.
+AC_DEFINE_UNQUOTED([ENABLE_FREETYPE], [1], [Enable building with FreeType.])
+
 dnl cache version
-CACHE_VERSION=9
+CACHE_VERSION=11
 AC_SUBST(CACHE_VERSION)
 
 dnl libtool versioning
@@ -171,6 +182,7 @@ dnl ==========================================================================
 AC_HEADER_DIRENT
 # Autoupdate added the next two lines to ensure that your configure
 # script's behavior did not change.  They are probably safe to remove.
+AC_CHECK_INCLUDES_DEFAULT
 AC_PROG_EGREP
 
 AC_CHECK_HEADERS([dirent.h fcntl.h stdlib.h string.h unistd.h sys/statvfs.h sys/vfs.h sys/statfs.h sys/param.h sys/mount.h])
@@ -183,9 +195,12 @@ AC_C_FLEXIBLE_ARRAY_MEMBER
 AC_TYPE_PID_T
 
 # Checks for library functions.
+AX_FUNC_SNPRINTF
 AC_FUNC_VPRINTF
 AC_FUNC_MMAP
-AC_CHECK_FUNCS([link mkstemp mkostemp _mktemp_s mkdtemp getopt getopt_long getprogname getexecname rand random lrand48 random_r rand_r readlink fstatvfs fstatfs lstat strerror strerror_r])
+AC_CHECK_FUNCS([link mkstemp _mktemp_s mkdtemp getopt getopt_long getprogname getexecname rand random lrand48 random_r rand_r readlink fstatvfs fstatfs lstat strerror strerror_r strdup vasprintf])
+
+AC_CHECK_DECL([mkostemp],[AC_DEFINE_UNQUOTED([HAVE_MKOSTEMP],[1],[Define to 1 if you have the 'mkostemp' function.])],[],[#include <stdlib.h>])
 
 AC_SEARCH_LIBS([fabs], [m], [], [AC_MSG_ERROR([unable to find the fabs() function])])
 
@@ -239,6 +254,41 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
 )])
 AC_DEFINE_UNQUOTED(FC_GPERF_SIZE_T, $FC_GPERF_SIZE_T, [The type of len parameter of the gperf hash/lookup function])
 AC_MSG_RESULT($FC_GPERF_SIZE_T)
+
+AC_CHECK_VA_COPY
+
+AC_CACHE_CHECK([Whether vsnprintf is C99-compliant], [fc_cv_c99_vsnprintf],
+	[AC_RUN_IFELSE([AC_LANG_SOURCE([[
+#include <sys/types.h>
+#include <stdio.h>
+#include <stdarg.h>
+#include <stdlib.h>
+int
+foo(char *format, ...)
+{
+	va_list ap;
+	char c;
+	int retval = 0;
+
+	va_start(ap, format);
+	if (vsnprintf(&c, 1, format, ap) < 0) {
+		retval = -1;
+	}
+	va_end(ap);
+
+	return retval;
+}
+int
+main(void)
+{
+	char c;
+
+	return foo("foo: %s", "bar");
+}]])],
+	[fc_cv_c99_vsnprintf=yes],[fc_cv_c99_vsnprintf=no],[fc_cv_c99_vsnprintf=no])])
+if test "x$fc_cv_c99_vsnprintf" = xyes; then
+	AC_DEFINE(HAVE_C99_VSNPRINTF, 1, [Have C99-compliant vsnprintf])
+fi
 
 #
 # Checks for iconv
@@ -527,7 +577,7 @@ yes)
 	if test "$os_win32" = "yes"; then
 		default_fonts="WINDOWSFONTDIR,WINDOWSUSERFONTDIR"
 	elif test "$os_darwin" = "yes"; then
-		default_fonts="/System/Library/Fonts,/Library/Fonts,~/Library/Fonts,/System/Library/Assets/com_apple_MobileAsset_Font3,/System/Library/Assets/com_apple_MobileAsset_Font4"
+		default_fonts="/System/Library/Fonts,/Library/Fonts,~/Library/Fonts,/System/Library/Assets,/System/Library/AssetsV2"
 	elif test "$os_android" = "yes"; then
 		default_fonts="/system/fonts,/product/fonts"
 	else
@@ -853,6 +903,8 @@ conf.d/Makefile
 fc-cache/Makefile
 fc-cat/Makefile
 fc-conflist/Makefile
+fc-const/Makefile
+fc-genconf/Makefile
 fc-list/Makefile
 fc-match/Makefile
 fc-pattern/Makefile
@@ -865,6 +917,7 @@ doc/cache-version.sgml
 doc/version.sgml
 its/Makefile
 po/Makefile.in
+po-conf/Makefile.in
 test/Makefile
 fontconfig.pc
 fontconfig-zip

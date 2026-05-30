@@ -36,6 +36,7 @@
 #include <errno.h>
 #include <float.h>
 #include <limits.h>
+#include <locale.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -148,7 +149,6 @@ extern pfnSHGetFolderPathA          pSHGetFolderPathA;
 
 FC_ASSERT_STATIC (sizeof (FcRef) == sizeof (int));
 
-#define FcStrdup(s)                    ((FcChar8 *)strdup ((const char *)(s)))
 #define FcFree(s)                      (free ((FcChar8 *)(s)))
 
 /*
@@ -157,19 +157,19 @@ FC_ASSERT_STATIC (sizeof (FcRef) == sizeof (int));
  */
 
 /* Is the provided pointer actually an offset? */
-#define FcIsEncodedOffset(p)           ((((intptr_t)(p)) & 1) != 0)
+#define FcIsEncodedOffset(p)           ((((uintptr_t)(p)) & 1) != 0)
 
 /* Encode offset in a pointer of type t */
-#define FcOffsetEncode(o, t)           ((t *)(intptr_t)((o) | 1))
+#define FcOffsetEncode(o, t)           ((t *)(uintptr_t)((o) | 1))
 
 /* Decode a pointer into an offset */
-#define FcOffsetDecode(p)              (((intptr_t)(p)) & ~1)
+#define FcOffsetDecode(p)              (((uintptr_t)(p)) & ~1)
 
 /* Compute pointer offset */
-#define FcPtrToOffset(b, p)            ((ptrdiff_t)((intptr_t)(p) - (intptr_t)(b)))
+#define FcPtrToOffset(b, p)            ((ptrdiff_t)((uintptr_t)(p) - (uintptr_t)(b)))
 
 /* Given base address, offset and type, return a pointer */
-#define FcOffsetToPtr(b, o, t)         ((t *)((intptr_t)(b) + (ptrdiff_t)(o)))
+#define FcOffsetToPtr(b, o, t)         ((t *)((uintptr_t)(b) + (ptrdiff_t)(o)))
 
 /* Given base address, encoded offset and type, return a pointer */
 #define FcEncodedOffsetToPtr(b, p, t)  FcOffsetToPtr (b, FcOffsetDecode (p), t)
@@ -206,13 +206,11 @@ typedef struct _FcValueList {
 
 #define FcValueListNext(vl) FcPointerMember (vl, next, FcValueList)
 
-typedef int FcObject;
-
 /* The 1024 is to leave some room for future added internal objects, such
  * that caches from newer fontconfig can still be used with older fontconfig
  * without getting confused. */
-#define FC_EXT_OBJ_INDEX 1024
-#define FC_OBJ_ID(_n_)   ((_n_) & (~FC_EXT_OBJ_INDEX))
+#define FC_EXT_OBJ_INDEX    1024
+#define FC_OBJ_ID(_n_)      ((_n_) & (~FC_EXT_OBJ_INDEX))
 
 typedef struct _FcPatternElt *FcPatternEltPtr;
 
@@ -449,15 +447,18 @@ typedef int (*FcCompareFunc) (const FcChar8 *v1, const FcChar8 *v2);
 typedef FcBool (*FcCopyFunc) (const void *src, void **dest);
 
 struct _FcCache {
-    unsigned int magic;         /* FC_CACHE_MAGIC_MMAP or FC_CACHE_ALLOC */
-    int          version;       /* FC_CACHE_VERSION_NUMBER */
-    intptr_t     size;          /* size of file */
-    intptr_t     dir;           /* offset to dir name */
-    intptr_t     dirs;          /* offset to subdirs */
-    int          dirs_count;    /* number of subdir strings */
-    intptr_t     set;           /* offset to font set */
-    int          checksum;      /* checksum of directory state */
+    unsigned int magic;      /* FC_CACHE_MAGIC_MMAP or FC_CACHE_ALLOC */
+    int          version;    /* FC_CACHE_VERSION_NUMBER */
+    intptr_t     size;       /* size of file */
+    intptr_t     dir;        /* offset to dir name */
+    intptr_t     dirs;       /* offset to subdirs */
+    int          dirs_count; /* number of subdir strings */
+    int          pad1;
+    intptr_t     set;      /* offset to font set */
+    int          checksum; /* checksum of directory state */
+    int          pad2;
     int64_t      checksum_nano; /* checksum of directory state */
+    int64_t      fc_version;    /* fontconfig version */
 };
 
 #undef FcCacheDir
@@ -653,6 +654,66 @@ struct _FcValuePromotionBuffer {
 	char   c[256]; /* Enlarge as needed */
     } u;
 };
+
+#ifdef _WIN32
+typedef _locale_t FcLocale;
+typedef enum _FcLocaleMask {
+    FC_LC_CTYPE = LC_CTYPE,
+    FC_LC_NUMERIC = LC_NUMERIC,
+    FC_LC_TIME = LC_TIME,
+    FC_LC_COLLATE = LC_COLLATE,
+    FC_LC_MONETARY = LC_MONETARY,
+    FC_LC_MESSAGES = LC_ALL, /* not available */
+    FC_LC_PAPER = LC_ALL,
+    FC_LC_NAME = LC_ALL,
+    FC_LC_ADDRESS = LC_ALL,
+    FC_LC_TELEPHONE = LC_ALL,
+    FC_LC_MEASUREMENT = LC_ALL,
+    FC_LC_IDENTIFICATION = LC_ALL,
+    FC_LC_ALL = LC_ALL,
+} FcLocaleMask;
+#else
+typedef locale_t FcLocale;
+typedef enum _FcLocaleMask {
+    FC_LC_CTYPE = LC_CTYPE_MASK,
+    FC_LC_NUMERIC = LC_NUMERIC_MASK,
+    FC_LC_TIME = LC_TIME_MASK,
+    FC_LC_COLLATE = LC_COLLATE_MASK,
+    FC_LC_MONETARY = LC_MONETARY_MASK,
+    FC_LC_MESSAGES = LC_MESSAGES_MASK,
+#ifdef LC_PAPER_MASK
+    FC_LC_PAPER = LC_PAPER_MASK,
+#else
+    FC_LC_PAPER = LC_ALL_MASK,
+#endif
+#ifdef LC_NAME_MASK
+    FC_LC_NAME = LC_NAME_MASK,
+#else
+    FC_LC_NAME = LC_ALL_MASK,
+#endif
+#ifdef LC_ADDRESS_MASK
+    FC_LC_ADDRESS = LC_ADDRESS_MASK,
+#else
+    FC_LC_ADDRESS = LC_ALL_MASK,
+#endif
+#ifdef LC_TELEPHONE_MASK
+    FC_LC_TELEPHONE = LC_TELEPHONE_MASK,
+#else
+    FC_LC_TELEPHONE = LC_ALL_MASK,
+#endif
+#ifdef LC_MEASUREMENT_MASK
+    FC_LC_MEASUREMENT = LC_MEASUREMENT_MASK,
+#else
+    FC_LC_MEASUREMENT = LC_ALL_MASK,
+#endif
+#ifdef LC_IDENTIFICATION_MASK
+    FC_LC_IDENTIFICATION = LC_IDENTIFICATION_MASK,
+#else
+    FC_LC_IDENTIFICATION = LC_ALL_MASK,
+#endif
+    FC_LC_ALL = LC_ALL_MASK,
+} FcLocaleMask;
+#endif
 
 /* fccache.c */
 
@@ -904,43 +965,211 @@ FcReadLink (const FcChar8 *pathname,
             FcChar8       *buf,
             size_t         bufsiz);
 
+FcPrivate FcLocale
+FcLocaleCreate (FcLocaleMask mask, const char *locale);
+
+#ifndef _WIN32
+FcPrivate FcLocale
+FcLocaleSetCurrent (FcLocale loc);
+#endif
+
+FcPrivate void
+FcLocaleDestroy (FcLocale locale);
+
+/* fcconffile.c */
+#if HAVE_VASPRINTF_L
+#  define FcStrDupVapFormat(__ret__, __format__, __va__)               \
+      {                                                                \
+	  FcLocale loc = FcLocaleCreate (FC_LC_NUMERIC, "C");          \
+	  if (vasprintf_l (&(__ret__), loc, __format__, __va__) < 0) { \
+	      (__ret__) = NULL;                                        \
+	  }                                                            \
+	  FcLocaleDestroy (loc);                                       \
+      }
+#elif HAVE__VSNPRINTF_L
+#  define FcStrDupVapFormat(__ret__, __format__, __va__)                                        \
+      {                                                                                         \
+	  char     FcStrDupVapFormat_c;                                                         \
+	  va_list  FcStrDupVapFormat_va;                                                        \
+	  int      FcStrDupVapFormat_size;                                                      \
+	  FcLocale loc = FcLocaleCreate (FC_LC_NUMERIC, "C");                                   \
+                                                                                                \
+	  (__ret__) = NULL;                                                                     \
+	  va_copy (FcStrDupVapFormat_va, __va__);                                               \
+	  FcStrDupVapFormat_size = vsnprintf (&FcStrDupVapFormat_c, 1, __format__, __va__) + 1; \
+	  va_end (FcStrDupVapFormat_va);                                                        \
+	  if (FcStrDupVapFormat_size > 0) {                                                     \
+	      (__ret__) = malloc (FcStrDupVapFormat_size);                                      \
+	      if ((__ret__)) {                                                                  \
+		  _vsnprintf_l ((__ret__), FcStrDupVapFormat_size, __format__, loc, __va__);    \
+	      }                                                                                 \
+	  }                                                                                     \
+	  FcLocaleDestroy (loc);                                                                \
+      }
+#elif HAVE_VASPRINTF
+#  define FcStrDupVapFormat(__ret__, __format__, __va__)        \
+      {                                                         \
+	  FcLocale loc = FcLocaleCreate (FC_LC_NUMERIC, "C");   \
+	  FcLocale oldloc = FcLocaleSetCurrent (loc);           \
+	  if (vasprintf (&(__ret__), __format__, __va__) < 0) { \
+	      (__ret__) = NULL;                                 \
+	  }                                                     \
+	  FcLocaleSetCurrent (oldloc);                          \
+	  FcLocaleDestroy (loc);                                \
+      }
+#elif HAVE_C99_VSNPRINTF
+#  define FcStrDupVapFormat(__ret__, __format__, __va__)                                        \
+      {                                                                                         \
+	  char     FcStrDupVapFormat_c;                                                         \
+	  va_list  FcStrDupVapFormat_va;                                                        \
+	  int      FcStrDupVapFormat_size;                                                      \
+	  FcLocale loc = FcLocaleCreate (FC_LC_NUMERIC, "C");                                   \
+	  FcLocale oldloc = FcLocaleSetCurrent (loc);                                           \
+                                                                                                \
+	  (__ret__) = NULL;                                                                     \
+	  va_copy (FcStrDupVapFormat_va, __va__);                                               \
+	  FcStrDupVapFormat_size = vsnprintf (&FcStrDupVapFormat_c, 1, __format__, __va__) + 1; \
+	  va_end (FcStrDupVapFormat_va);                                                        \
+	  if (FcStrDupVapFormat_size > 0) {                                                     \
+	      (__ret__) = malloc (FcStrDupVapFormat_size);                                      \
+	      if ((__ret__)) {                                                                  \
+		  vsprintf ((__ret__), __format__, __va__);                                     \
+	      }                                                                                 \
+	  }                                                                                     \
+	  FcLocaleSetCurrent (oldloc);                                                          \
+	  FcLocaleDestroy (loc);                                                                \
+      }
+#elif HAVE_VSNPRINTF
+#  define FcStrDupVapFormat(__ret__, __format__, __va__)                                                                 \
+      {                                                                                                                  \
+	  va_list  FcStrDupVapFormat_va;                                                                                 \
+	  int      FcStrDupVapFormat_size = 1024, FcStrDupVapFormat_n;                                                   \
+	  char    *FcStrDupVapFormat_p;                                                                                  \
+	  FcLocale loc = FcLocaleCreate (FC_LC_NUMERIC, "C");                                                            \
+	  FcLocale oldloc = FcLocaleSetCurrent (loc);                                                                    \
+                                                                                                                         \
+	  (__ret__) = malloc (FcStrDupVapFormat_size);                                                                   \
+	  if ((__ret__)) {                                                                                               \
+	      while (1) {                                                                                                \
+		  va_copy (FcStrDupVapFormat_va, __va__);                                                                \
+		  FcStrDupVapFormat_n = vsnprintf ((__ret__), FcStrDupVapFormat_size, __format__, FcStrDupVapFormat_va); \
+		  va_end (FcStrDupVapFormat_va);                                                                         \
+		  if (FcStrDupVapFormat_n > -1 &&                                                                        \
+		      FcStrDupVapFormat_n < FcStrDupVapFormat_size)                                                      \
+		      break;                                                                                             \
+		  if (FcStrDupVapFormat_n > -1)                                                                          \
+		      FcStrDupVapFormat_size = FcStrDupVapFormat_n + 1;                                                  \
+		  else                                                                                                   \
+		      FcStrDupVapFormat_size *= 2;                                                                       \
+		  FcStrDupVapFormat_p = realloc ((__ret__), FcStrDupVapFormat_size);                                     \
+		  if (!FcStrDupVapFormat_p) {                                                                            \
+		      free ((__ret__));                                                                                  \
+		      (__ret__) = NULL;                                                                                  \
+		      break;                                                                                             \
+		  }                                                                                                      \
+		  (__ret__) = FcStrDupVapFormat_p;                                                                       \
+	      }                                                                                                          \
+	  }                                                                                                              \
+	  FcLocaleSetCurrent (oldloc);                                                                                   \
+	  FcLocaleDestroy (loc);                                                                                         \
+      }
+#else
+#  error no vsnprintf function implemented
+#endif
+
+#define FcStrBufVapFormat(__ret__, __buf__, __format__, __va__)             \
+    {                                                                       \
+	char *FcStrBufVapFormat_p = NULL;                                   \
+	FcStrDupVapFormat (FcStrBufVapFormat_p, __format__, __va__);        \
+	if (!FcStrBufVapFormat_p) {                                         \
+	    FcStrBufDestroy (__buf__);                                      \
+	    (__ret__) = FcFalse;                                            \
+	} else {                                                            \
+	    FcStrBufString (__buf__, (const FcChar8 *)FcStrBufVapFormat_p); \
+	    free (FcStrBufVapFormat_p);                                     \
+	    (__ret__) = FcTrue;                                             \
+	}                                                                   \
+    }
+
 /* fcdbg.c */
 
 FcPrivate void
-FcValuePrintFile (FILE *f, const FcValue v);
+FcValuePrintFile (FILE *stream, const FcValue v);
+
+FcPrivate void
+FcValuePrintFileWithPosition (FILE *stream, const FcValue v, FcBool show_pos_mark);
 
 FcPrivate void
 FcValuePrintWithPosition (const FcValue v, FcBool show_pos_mark);
 
 FcPrivate void
+FcValueListPrintFileWithPosition (FILE *stream, FcValueListPtr l, const FcValueListPtr pos);
+
+FcPrivate void
 FcValueListPrintWithPosition (FcValueListPtr l, const FcValueListPtr pos);
+
+FcPrivate void
+FcValueListPrintFile (FILE *stream, FcValueListPtr l);
 
 FcPrivate void
 FcValueListPrint (FcValueListPtr l);
 
 FcPrivate void
+FcLangSetPrintFile (FILE *stream, const FcLangSet *ls);
+
+FcPrivate void
 FcLangSetPrint (const FcLangSet *ls);
+
+FcPrivate void
+FcOpPrintFile (FILE *stream, FcOp op_);
 
 FcPrivate void
 FcOpPrint (FcOp op);
 
 FcPrivate void
+FcTestPrintFile (FILE *stream, const FcTest *test);
+
+FcPrivate void
 FcTestPrint (const FcTest *test);
+
+FcPrivate void
+FcExprPrintFile (FILE *stream, const FcExpr *expr);
 
 FcPrivate void
 FcExprPrint (const FcExpr *expr);
 
 FcPrivate void
+FcEditPrintFile (FILE *stream, const FcEdit *edit);
+
+FcPrivate void
 FcEditPrint (const FcEdit *edit);
+
+FcPrivate void
+FcRulePrintFile (FILE *stream, const FcRule *rule);
 
 FcPrivate void
 FcRulePrint (const FcRule *rule);
 
 FcPrivate void
+FcCharSetPrintFile (FILE *stream, const FcCharSet *c);
+
+FcPrivate void
 FcCharSetPrint (const FcCharSet *c);
 
 FcPrivate void
+FcPatternPrintFile (FILE *stream, const FcPattern *p);
+
+FcPrivate void
+FcPatternPrint2File (FILE              *stream,
+                     FcPattern         *pp1,
+                     FcPattern         *pp2,
+                     const FcObjectSet *os);
+
+FcPrivate void
 FcPatternPrint2 (FcPattern *p1, FcPattern *p2, const FcObjectSet *os);
+
+FcPrivate void
+FcFontSetPrintFile (FILE *stream, const FcFontSet *s);
 
 extern FcPrivate int FcDebugVal;
 
@@ -1081,7 +1310,7 @@ struct _FcLangSet {
 
 FcPrivate FcLangSet *
 FcLangSetFromCharSet (const FcCharSet *charset,
-                   const FcChar8   *exclusiveLang);
+                      const FcChar8   *exclusiveLang);
 
 FcPrivate FcLangResult
 FcLangCompare (const FcChar8 *s1, const FcChar8 *s2);
@@ -1127,7 +1356,10 @@ enum {
 };
 
 FcPrivate FcBool
-FcNameConstantWithObjectCheck (const FcChar8 *string, const char *object, int *result);
+FcNameConstantWithObjectCheck (const FcChar8 *string, FcObject object, int *result);
+
+FcPrivate const FcChar8 *
+FcNameGetConstantNameFromObject (FcObject object, int value);
 
 FcPrivate FcBool
 FcNameBool (const FcChar8 *v, FcBool *result);
@@ -1332,6 +1564,15 @@ FcPrivate FcBool
 FcIsFsMtimeBroken (const FcChar8 *dir);
 
 /* fcstr.c */
+FcPrivate double
+FcStrtod (char *s, char **end);
+
+FcPrivate FcChar8 *
+FcStrDupVaFormat (const char *format, va_list va);
+
+FcPrivate FcChar8 *
+FcStrDupFormat (const char *format, ...);
+
 FcPrivate FcStrSet *
 FcStrSetCreateEx (unsigned int control);
 
@@ -1379,6 +1620,12 @@ FcStrBufChar (FcStrBuf *buf, FcChar8 c);
 
 FcPrivate FcBool
 FcStrBufString (FcStrBuf *buf, const FcChar8 *s);
+
+FcPrivate FcBool
+FcStrBufVaFormat (FcStrBuf *buf, const char *format, va_list va);
+
+FcPrivate FcBool
+FcStrBufFormat (FcStrBuf *buf, const char *format, ...);
 
 FcPrivate FcBool
 FcStrBufData (FcStrBuf *buf, const FcChar8 *s, int len);

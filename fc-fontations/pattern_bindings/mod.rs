@@ -24,13 +24,13 @@
 
 pub mod fc_wrapper;
 
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::fmt::Debug;
 
 use fcint_bindings::{
-    FcPattern, FcPatternObjectAddBool, FcPatternObjectAddCharSet, FcPatternObjectAddDouble,
-    FcPatternObjectAddInteger, FcLangSet, FcPatternObjectAddLangSet, FcPatternObjectAddRange,
-    FcPatternObjectAddString, FC_FAMILY_OBJECT, FC_FILE_OBJECT,
+    FcLangSet, FcPattern, FcPatternObjectAddBool, FcPatternObjectAddCharSet,
+    FcPatternObjectAddDouble, FcPatternObjectAddInteger, FcPatternObjectAddLangSet,
+    FcPatternObjectAddRange, FcPatternObjectAddString, FC_FAMILY_OBJECT, FC_FILE_OBJECT,
 };
 
 use fc_wrapper::{FcCharSetWrapper, FcLangSetWrapper, FcPatternWrapper, FcRangeWrapper};
@@ -127,16 +127,16 @@ impl PatternElement {
                 FcPatternObjectAddDouble(pattern, self.object_id, value)
             },
             PatternValue::Range(value) => unsafe {
-                FcPatternObjectAddRange(pattern, self.object_id, value.into_raw())
+                FcPatternObjectAddRange(pattern, self.object_id, value.as_ptr())
             },
             PatternValue::CharSet(value) => unsafe {
-                FcPatternObjectAddCharSet(pattern, self.object_id, value.into_raw())
+                FcPatternObjectAddCharSet(pattern, self.object_id, value.as_ptr())
             },
             PatternValue::LangSet(value) => unsafe {
                 FcPatternObjectAddLangSet(
                     pattern,
                     self.object_id,
-                    value.into_raw() as *const FcLangSet,
+                    value.as_ptr() as *const FcLangSet,
                 )
             },
         } == 1;
@@ -161,6 +161,19 @@ impl FcPatternBuilder {
     #[allow(unused)]
     pub fn append_element(&mut self, element: PatternElement) {
         self.elements.push(element);
+    }
+
+    pub fn family_names(&self) -> impl Iterator<Item = &CStr> {
+        self.elements.iter().filter_map(|element| {
+            if element.object_id == FC_FAMILY_OBJECT as i32 {
+                if let PatternValue::String(s) = &element.value {
+                    if !s.is_empty() {
+                        return Some(s.as_c_str());
+                    }
+                }
+            }
+            None
+        })
     }
 
     #[allow(unused)]

@@ -1,6 +1,6 @@
 project('fontconfig', 'c',
-  version: '2.17.1',
-  meson_version : '>= 1.6.1',
+  version: '2.18.0',
+  meson_version : '>= 1.11.0',
   default_options: [
     'c_std=c11,c99',
     'buildtype=debugoptimized',
@@ -25,7 +25,7 @@ curversion = fc_version_minor - 1
 libversion = '@0@.@1@.0'.format(soversion, curversion)
 defversion = '@0@.@1@'.format(curversion, fc_version_micro)
 osxversion = curversion + 1
-cacheversion = '9'
+cacheversion = '11'
 
 freetype_req = '>= 21.0.15'
 freetype_req_cmake = '>= 2.8.1'
@@ -35,7 +35,14 @@ math_dep = cc.find_library('m', required: false)
 
 conf = configuration_data()
 
+conf.set('FC_VERSION_MAJOR', fc_version_major)
+conf.set('FC_VERSION_MINOR', fc_version_minor)
+conf.set('FC_VERSION_MICRO', fc_version_micro)
+
 freetype_dep = dependency('freetype2', method: 'pkg-config', version: freetype_req, required: false)
+
+# Preparation for enabling a FreeType-less build, for now, default enable.
+conf.set('ENABLE_FREETYPE', 1)
 
 # Give another shot using CMake
 if not freetype_dep.found()
@@ -109,12 +116,12 @@ check_headers = [
   ['sys/mount.h'],
   ['time.h'],
   ['wchar.h'],
+  ['xlocale.h'],
 ]
 
 check_funcs = [
   ['link'],
   ['mkstemp'],
-  ['mkostemp'],
   ['_mktemp_s'],
   ['mkdtemp'],
   ['getopt'],
@@ -133,14 +140,19 @@ check_funcs = [
   ['strerror'],
   ['strerror_r'],
   ['mmap'],
+  ['vasprintf_l'],
+  ['vasprintf'],
   ['vprintf'],
   ['vsnprintf'],
+  ['_vsnprintf_l'],
+  ['_vsnprintf_l', {'prefix': '#include <stdio.h>'}],
   ['vsprintf'],
   ['getpagesize'],
   ['getpid'],
   ['dcgettext'],
   ['gettext'],
   ['localtime_r'],
+  ['strdup'],
 ]
 
 check_freetype_funcs = [
@@ -152,7 +164,8 @@ check_freetype_funcs = [
 ]
 
 check_header_symbols = [
-  ['posix_fadvise', 'fcntl.h']
+  ['posix_fadvise', 'fcntl.h'],
+  ['mkostemp', 'stdlib.h'],
 ]
 
 check_struct_members = [
@@ -193,6 +206,12 @@ if host_machine.system() == 'windows'
   conf.set('EXEEXT', '.exe')
 else
   conf.set('EXEEXT', '')
+endif
+
+if host_machine.system() == 'sunos'
+  if not cc.has_header_symbol('string.h', 'strdup')
+    add_project_arguments('-D__EXTENSIONS__', language: 'c')
+  endif
 endif
 
 i18n = import('i18n')
@@ -248,8 +267,9 @@ foreach check : check_funcs
   name = check[0]
   opts = check.length() > 1 ? check[1] : {}
   extra_deps = opts.get('dependencies', [])
+  prefix = opts.get('prefix', '')
 
-  if cc.has_function(name, dependencies: extra_deps)
+  if cc.has_function(name, dependencies: extra_deps, prefix: prefix)
     conf.set('HAVE_@0@'.format(name.to_upper()), 1)
   endif
 endforeach
@@ -319,6 +339,9 @@ if cc.links(files('meson-cc-tests/solaris-atomic-operations.c'), name: 'Solaris 
   conf.set('HAVE_SOLARIS_ATOMIC_OPS', 1)
 endif
 
+if cc.links(files('meson-cc-tests/c99-vsnprint-test.c'), name: 'C99 compliant vsnprintf()')
+  conf.set('HAVE_C99_VSNPRINTF', 1)
+endif
 
 prefix = get_option('prefix')
 
@@ -329,7 +352,7 @@ if default_fonts_dirs == ['yes']
   if host_machine.system() == 'windows'
     fc_fonts_paths = ['WINDOWSFONTDIR', 'WINDOWSUSERFONTDIR']
   elif host_machine.system() == 'darwin'
-    fc_fonts_paths = ['/System/Library/Fonts', '/Library/Fonts', '~/Library/Fonts', '/System/Library/Assets/com_apple_MobileAsset_Font3', '/System/Library/Assets/com_apple_MobileAsset_Font4']
+    fc_fonts_paths = ['/System/Library/Fonts', '/Library/Fonts', '~/Library/Fonts', '/System/Library/Assets', '/System/Library/AssetsV2']
   elif host_machine.system() == 'android'
     fc_fonts_paths = ['/system/fonts/', '/product/fonts/']
   else
@@ -478,6 +501,7 @@ endforeach
 fcstdint_h = fs.copyfile('src/fcstdint.h.in', 'fcstdint.h')
 
 makealias = files('src/makealias.py')[0]
+fcobjs_h = files('src/fcobjs.h')[0]
 
 
 subdir('fontconfig')
@@ -506,6 +530,7 @@ tools_man_pages = []
 # Do not reorder
 subdir('fc-case')
 subdir('fc-lang')
+subdir('fc-const')
 subdir('src')
 
 if get_option('fontations').enabled()
@@ -555,6 +580,7 @@ if not get_option('tools').disabled()
   subdir('fc-cache')
   subdir('fc-cat')
   subdir('fc-conflist')
+  subdir('fc-genconf')
   subdir('fc-list')
   subdir('fc-match')
   subdir('fc-pattern')

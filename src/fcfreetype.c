@@ -682,9 +682,9 @@ FcSfntNameTranscode (FT_SfntName *sname)
     const char *fromcode;
 #if USE_ICONV
     iconv_t cd;
+    FcBool  redecoded = FcFalse;
 #endif
     FcChar8 *utf8;
-    FcBool   redecoded = FcFalse;
 
     for (i = 0; i < NUM_FC_FT_ENCODING; i++)
 	if (fcFtEncoding[i].platform_id == sname->platform_id &&
@@ -1209,6 +1209,7 @@ FcFreeTypeQueryFaceInternal (const FT_Face   face,
 
     FcBool   symbol = FcFalse;
     FT_Error ftresult;
+    FcChar8 *canon_file = NULL;
 
     FcInitDebug(); /* We might be called with no initizalization whatsoever. */
 
@@ -1713,7 +1714,8 @@ FcFreeTypeQueryFaceInternal (const FT_Face   face,
 	    goto bail1;
     }
 
-    if (file && *file && !FcPatternObjectAddString (pat, FC_FILE_OBJECT, file))
+    canon_file = FcStrCanonFilename(file);
+    if (canon_file && *canon_file && !FcPatternObjectAddString (pat, FC_FILE_OBJECT, canon_file))
 	goto bail1;
 
     if (!FcPatternObjectAddInteger (pat, FC_INDEX_OBJECT, id))
@@ -1726,7 +1728,7 @@ FcFreeTypeQueryFaceInternal (const FT_Face   face,
      * the attribute.  Sigh.
      */
     if ((face->face_flags & FT_FACE_FLAG_FIXED_WIDTH) != 0)
-	if (!FcPatternObjectAddInteger (pat, FC_SPACING_OBJECT, FC_MONO))
+	if (!FcPatternObjectAddInteger (pat, FC_SPACING_OBJECT, FC_SPACING_MONO))
 	    goto bail1;
 #endif
 
@@ -1965,11 +1967,11 @@ FcFreeTypeQueryFaceInternal (const FT_Face   face,
     if (FT_Get_BDF_Property (face, "SPACING", &prop) == 0 &&
         prop.type == BDF_PROPERTY_TYPE_ATOM && prop.u.atom != NULL) {
 	if (!strcmp (prop.u.atom, "c") || !strcmp (prop.u.atom, "C"))
-	    spacing = FC_CHARCELL;
+	    spacing = FC_SPACING_CHARCELL;
 	else if (!strcmp (prop.u.atom, "m") || !strcmp (prop.u.atom, "M"))
-	    spacing = FC_MONO;
+	    spacing = FC_SPACING_MONO;
 	else if (!strcmp (prop.u.atom, "p") || !strcmp (prop.u.atom, "P"))
-	    spacing = FC_PROPORTIONAL;
+	    spacing = FC_SPACING_PROPORTIONAL;
     }
 #endif
 
@@ -2013,7 +2015,7 @@ FcFreeTypeQueryFaceInternal (const FT_Face   face,
 
     FcLangSetDestroy (ls);
 
-    if (spacing != FC_PROPORTIONAL)
+    if (spacing != FC_SPACING_PROPORTIONAL)
 	if (!FcPatternObjectAddInteger (pat, FC_SPACING_OBJECT, spacing))
 	    goto bail2;
 
@@ -2072,12 +2074,45 @@ FcFreeTypeQueryFaceInternal (const FT_Face   face,
 	if (!FcPatternObjectAddString (pat, FC_FONT_WRAPPER_OBJECT, wrapper))
 	    goto bail2;
 
+    {
+	FcPatternElt *elt;
+	FcValueListPtr l;
+	int generic_family = FC_FAMILY_UNKNOWN;
+
+	elt = FcPatternObjectFindElt (pat, FC_FAMILY_OBJECT);
+	for (l = FcPatternEltValues (elt); l; l = FcValueListNext (l)) {
+	    FcValue v = FcValueCanonicalize (&l->value);
+
+	    if (v.type == FcTypeString) {
+		if (FcStrStrIgnoreCase (v.u.s, (FcChar8 *)"mono")) {
+		    generic_family = FC_FAMILY_MONO;
+		    break;
+		} else if (FcStrStrIgnoreCase (v.u.s, (FcChar8 *)"sans")) {
+		    generic_family = FC_FAMILY_SANS;
+		    break;
+		} else if (FcStrStrIgnoreCase (v.u.s, (FcChar8 *)"serif")) {
+		    generic_family = FC_FAMILY_SERIF;
+		    break;
+		} else if (FcStrStrIgnoreCase (v.u.s, (FcChar8 *)"emoji")) {
+		    generic_family = FC_FAMILY_EMOJI;
+		    break;
+		} else if (FcStrStrIgnoreCase (v.u.s, (FcChar8 *)"math")) {
+		    generic_family = FC_FAMILY_MATH;
+		    break;
+		}
+	    }
+	}
+	FcPatternObjectAddInteger(pat, FC_GENERIC_FAMILY_OBJECT, generic_family);
+    }
+
     /*
      * Drop our reference to the charset
      */
     FcCharSetDestroy (cs);
     if (foundry_)
 	free (foundry_);
+    if (canon_file)
+	free (canon_file);
 
     if (mmvar) {
 #ifdef HAVE_FT_DONE_MM_VAR
@@ -2106,6 +2141,8 @@ bail1:
 	free (name_mapping);
     if (foundry_)
 	free (foundry_);
+    if (canon_file)
+	free (canon_file);
 bail0:
     return NULL;
 }
@@ -2403,13 +2440,13 @@ FcFreeTypeSpacing (FT_Face face)
     }
 
     if (num_advances <= 1)
-	return FC_MONO;
+	return FC_SPACING_MONO;
     else if (num_advances == 2 &&
              fc_approximately_equal (fc_min (advances[0], advances[1]) * 2,
                                      fc_max (advances[0], advances[1])))
-	return FC_DUAL;
+	return FC_SPACING_DUAL;
     else
-	return FC_PROPORTIONAL;
+	return FC_SPACING_PROPORTIONAL;
 }
 
 FcCharSet *

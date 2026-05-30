@@ -24,6 +24,8 @@
 
 #include "fcint.h"
 
+#include <locale.h>
+
 static double
 FcCompareNumber (const FcValue *value1, const FcValue *value2, FcValue *bestValue)
 {
@@ -328,6 +330,7 @@ typedef enum _FcMatcherPriority {
     PRI1 (COLOR),
     PRI1 (FOUNDRY),
     PRI1 (CHARSET),
+    PRI1 (GENERIC_FAMILY),
     PRI_FAMILY_STRONG,
     PRI_POSTSCRIPT_NAME_STRONG,
     PRI1 (LANG),
@@ -748,8 +751,8 @@ FcFontRenderPrepare (FcConfig  *config,
 	         fe->object == FC_WIDTH_OBJECT ||
 	         fe->object == FC_SIZE_OBJECT)) {
 		double      num;
-		FcChar8     temp[128];
 		const char *tag = "    ";
+
 		assert (v.type == FcTypeDouble);
 		num = v.u.d;
 		if (variations.len)
@@ -768,8 +771,7 @@ FcFontRenderPrepare (FcConfig  *config,
 		    tag = "opsz";
 		    break;
 		}
-		sprintf ((char *)temp, "%4s=%g", tag, num);
-		FcStrBufString (&variations, temp);
+		FcStrBufFormat (&variations, "%4s=%g", tag, num);
 	    }
 	} else {
 	    FcPatternObjectListAdd (newp, fe->object,
@@ -918,7 +920,7 @@ FcFontSetMatchInternal (FcFontSet **sets,
 	    char  *p;
 	    FcBool f = FcTrue;
 
-	    ss = s = strdup (env);
+	    ss = s = (char *)FcStrCopy ((const FcChar8 *)env);
 	    os = FcObjectSetCreate();
 	    while (f) {
 		size_t len;
@@ -1156,6 +1158,10 @@ FcFontSetSort (FcConfig   *config,
     if (!nnodes)
 	return FcFontSetCreate();
 
+    if (!config)
+	config = FcConfigGetCurrent();
+    FcConfigReference (config);
+
     for (nPatternLang = 0;
          FcPatternGet (p, FC_LANG, nPatternLang, &patternLang) == FcResultMatch;
          nPatternLang++)
@@ -1189,7 +1195,7 @@ FcFontSetSort (FcConfig   *config,
 	    /* TODO: Should we check a FcPattern in FcFontSet?
 	     * This way may not work if someone has own list of application fonts
 	     * That said, just to reduce the cost for lookup so far.
-             */
+	     */
 	    if (config->prefer_app_fonts && s != config->fonts[FcSetApplication]) {
 		newp->score[PRI_ORDER] += 1000;
 	    }
@@ -1274,6 +1280,8 @@ FcFontSetSort (FcConfig   *config,
 	    FcPatternPrint (ret->fonts[0]);
 	}
     }
+    if (config)
+	FcConfigDestroy (config);
 
     return ret;
 
@@ -1282,6 +1290,8 @@ bail2:
 bail1:
     free (nodes);
 bail0:
+    if (config)
+	FcConfigDestroy (config);
     return 0;
 }
 
