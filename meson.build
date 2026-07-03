@@ -1,5 +1,5 @@
 project('fontconfig', 'c',
-  version: '2.18.0',
+  version: '2.18.1',
   meson_version : '>= 1.11.0',
   default_options: [
     'c_std=c11,c99',
@@ -339,9 +339,7 @@ if cc.links(files('meson-cc-tests/solaris-atomic-operations.c'), name: 'Solaris 
   conf.set('HAVE_SOLARIS_ATOMIC_OPS', 1)
 endif
 
-if cc.links(files('meson-cc-tests/c99-vsnprint-test.c'), name: 'C99 compliant vsnprintf()')
-  conf.set('HAVE_C99_VSNPRINTF', 1)
-endif
+conf.set('HAVE_C99_VSNPRINTF', 1)
 
 prefix = get_option('prefix')
 
