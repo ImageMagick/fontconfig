@@ -1,5 +1,5 @@
 project('fontconfig', 'c',
-  version: '2.18.1',
+  version: '2.18.2',
   meson_version : '>= 1.11.0',
   default_options: [
     'c_std=c11,c99',
@@ -25,7 +25,13 @@ curversion = fc_version_minor - 1
 libversion = '@0@.@1@.0'.format(soversion, curversion)
 defversion = '@0@.@1@'.format(curversion, fc_version_micro)
 osxversion = curversion + 1
-cacheversion = '11'
+cacheversion = 12
+cachesnapversion = 0
+if cachesnapversion > 0
+  nextcacheversion = cacheversion + 1
+else
+  nextcacheversion = 0
+endif
 
 freetype_req = '>= 21.0.15'
 freetype_req_cmake = '>= 2.8.1'
@@ -153,6 +159,7 @@ check_funcs = [
   ['gettext'],
   ['localtime_r'],
   ['strdup'],
+  ['uselocale'],
 ]
 
 check_freetype_funcs = [
@@ -529,6 +536,7 @@ tools_man_pages = []
 subdir('fc-case')
 subdir('fc-lang')
 subdir('fc-const')
+subdir('fc-genericfamily')
 subdir('src')
 
 if get_option('fontations').enabled()
@@ -643,6 +651,7 @@ summary({
   'Documentation': (doc_targets.length() > 0 ? doc_targets : false),
   'NLS': not opt_nls.disabled(),
   'Tests': not get_option('tests').disabled(),
+  'Tests (external fonts)': get_option('tests-external-fonts').allowed(),
   'Pytest': pytest.found(),
   'Tools': not get_option('tools').disabled(),
   'iconv': found_iconv == 1,

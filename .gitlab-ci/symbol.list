@@ -1,9 +1,0 @@
-# explicitly dropped symbols
-FcCacheDir
-FcCacheSubdir
-FcConfigGetRescanInverval
-FcConfigSetRescanInverval
-# Already missing in the private header and must be fixed in the future
-FcConfigAddRule
-FcRuleDestroy
-FcScandir

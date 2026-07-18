@@ -37,9 +37,6 @@
 #include <float.h>
 #include <limits.h>
 #include <locale.h>
-#ifdef __APPLE__
-#  include <xlocale.h>
-#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -836,10 +833,6 @@ FcConfigGlobAdd (FcConfig      *config,
                  FcBool         accept);
 
 FcPrivate FcBool
-FcConfigAcceptFilename (FcConfig      *config,
-                        const FcChar8 *filename);
-
-FcPrivate FcBool
 FcConfigPatternsAdd (FcConfig  *config,
                      FcPattern *pattern,
                      FcBool     accept);
@@ -1237,6 +1230,10 @@ FcFontSetSerialize (FcSerialize *serialize, const FcFontSet *s);
 
 FcPrivate FcFontSet *
 FcFontSetDeserialize (const FcFontSet *set);
+
+/* fcgenericalias.c */
+FcPrivate uint32_t
+FcGenericAliasGetClassification (const char *family);
 
 /* fcplist.c */
 FcPrivate FcPtrList *
