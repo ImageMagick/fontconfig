@@ -1,8 +1,8 @@
 [VERSION]
-2.18.2
+2.18.3
 
 [RELEASE_DATE]
-2026-07-09
+2026-08-06
 
 [PRODUCT_NAME]
 fontconfig

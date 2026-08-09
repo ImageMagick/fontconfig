@@ -33,7 +33,7 @@ dnl This is the package version number, not the shared library
 dnl version.  This same version number must appear in fontconfig/fontconfig.h
 dnl Yes, it is a pain to synchronize version numbers.  Unfortunately, it's
 dnl not possible to extract the version number here from fontconfig.h
-AC_INIT([fontconfig],[2.18.2],[https://gitlab.freedesktop.org/fontconfig/fontconfig/issues/new])
+AC_INIT([fontconfig],[2.18.3],[https://gitlab.freedesktop.org/fontconfig/fontconfig/issues/new])
 AM_INIT_AUTOMAKE([1.11 parallel-tests dist-xz foreign])
 m4_ifdef([AM_SILENT_RULES],[AM_SILENT_RULES([yes])])
 
@@ -82,6 +82,8 @@ AC_DEFINE_UNQUOTED([ENABLE_FREETYPE], [1], [Enable building with FreeType.])
 dnl cache version
 CACHE_VERSION=12
 AC_SUBST(CACHE_VERSION)
+CACHE_MIN_COMPAT_VERSION=9
+AC_SUBST(CACHE_MIN_COMPAT_VERSION)
 CACHE_SNAP_VERSION=0
 AC_SUBST(CACHE_SNAP_VERSION)
 if [[ "$CACHE_SNAP_VERSION" -gt 0 ]]; then
@@ -206,7 +208,7 @@ AC_TYPE_PID_T
 AX_FUNC_SNPRINTF
 AC_FUNC_VPRINTF
 AC_FUNC_MMAP
-AC_CHECK_FUNCS([link mkstemp _mktemp_s mkdtemp getopt getopt_long getprogname getexecname rand random lrand48 random_r rand_r readlink fstatvfs fstatfs lstat strerror strerror_r strdup vasprintf uselocale])
+AC_CHECK_FUNCS([link symlink mkstemp _mktemp_s mkdtemp getopt getopt_long getprogname getexecname rand random lrand48 random_r rand_r readlink fstatvfs fstatfs lstat strerror strerror_r strdup vasprintf uselocale])
 
 AC_CHECK_DECL([mkostemp],[AC_DEFINE_UNQUOTED([HAVE_MKOSTEMP],[1],[Define to 1 if you have the 'mkostemp' function.])],[],[#include <stdlib.h>])
 

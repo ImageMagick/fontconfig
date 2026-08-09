@@ -37,9 +37,6 @@
 #include <float.h>
 #include <limits.h>
 #include <locale.h>
-#ifdef __APPLE__
-#  include <xlocale.h>
-#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,6 +55,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
+
+#ifdef HAVE_XLOCALE_H
+#include <xlocale.h>
+#endif
 
 #include "fcatomic.h"
 #include "fcdeprecate.h"
